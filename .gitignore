@@ -14,8 +14,7 @@
 [Aa]ssets/Plugins/Unisave.meta
 
 # Unisave preferences file
-/[Aa]ssets/Resources/UnisavePreferencesFile.json
-/[Aa]ssets/Resources/UnisavePreferencesFile.json.meta
+/[Aa]ssets/Resources*
 
 # TMP asset
 [Aa]ssets/TextMesh Pro

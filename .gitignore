@@ -2,6 +2,13 @@
 # My Custom gitignore rules #
 #############################
 
+# Steamworks.NET
+/[Aa]ssets/com.rlabrecque.steamworks.net
+/[Aa]ssets/com.rlabrecque.steamworks.net.meta
+/[Aa]ssets/Scripts/SteamManager.cs
+/[Aa]ssets/Scripts/SteamManager.meta
+/steam_appid.txt
+
 # Unisave asset
 [Aa]ssets/Plugins/Unisave
 [Aa]ssets/Plugins/Unisave.meta
@@ -19,9 +26,6 @@ UIElementsSchema/
 # Most special folders in root are from other assets (e.g. Steamworks.NET)
 /[Aa]ssets/Editor*
 /[Aa]ssets/Scripts*
-
-# Steamworks.NET
-steam_appid.txt
 
 # Rider
 .idea/

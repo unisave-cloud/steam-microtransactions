@@ -1,38 +1,32 @@
 using System;
 using System.Collections.Generic;
-using System.Runtime.Serialization;
+using System.Threading.Tasks;
 using Unisave.Facades;
 using Unisave.Facets;
 using Unisave.HttpClient;
 using Unisave.Utils;
 
-/*
- * SteamMicrotransactions template - v0.9.0
- * ----------------------------------------
- * 
- * This facet acts as the purchasing server described by Steam.
- * It makes requests to Steam API, initiating and finishing transactions.
- *
- * Read more from Steam:
- * https://partner.steamgames.com/doc/features/microtransactions/implementation
- *
- * Environment variables needed:
- * STEAM_API_URL=https://partner.steam-api.com/
- * STEAM_APP_ID=480
- * STEAM_PUBLISHER_KEY=secret
- * STEAM_USE_MICROTRANSACTION_SANDBOX=false
- */
-
 namespace Unisave.SteamMicrotransactions
 {
     public class SteamPurchasingServerFacet : Facet
     {
+        private readonly SteamMicrotransactionsConfig config;
+        
+        public SteamPurchasingServerFacet(SteamMicrotransactionsConfig config)
+        {
+            this.config = config;
+            
+            config.LogValidationWarnings();
+        }
+        
         /// <summary>
         /// Call this method from anywhere within your game
         /// to initiate a new transaction
         /// </summary>
         /// <param name="transaction">Proposal of a new transaction</param>
-        public void InitiateTransaction(SteamTransactionEntity transaction)
+        public async Task InitiateTransaction(
+            SteamTransactionEntity transaction
+        )
         {
             ValidateTransactionProposal(transaction);
 
@@ -42,7 +36,7 @@ namespace Unisave.SteamMicrotransactions
 
             StoreNewTransaction(transaction);
 
-            Response response = SendInitiationRequestToSteam(transaction);
+            Response response = await SendInitiationRequestToSteam(transaction);
 
             if (response["response"]["result"].AsString != "OK")
                 StoreInitiationErrorAndThrow(transaction, response);
@@ -63,7 +57,7 @@ namespace Unisave.SteamMicrotransactions
         /// <param name="orderId">The order being finalized</param>
         /// <param name="authorized">Player authorized or aborted?</param>
         /// <returns>The final transaction data</returns>
-        public SteamTransactionEntity FinalizeTransaction(
+        public async Task<SteamTransactionEntity> FinalizeTransaction(
             ulong orderId,
             bool authorized
         )
@@ -77,7 +71,9 @@ namespace Unisave.SteamMicrotransactions
                 return transaction;
             }
 
-            Response response = SendFinalizationRequestToSteam(transaction);
+            Response response = await SendFinalizationRequestToSteam(
+                transaction
+            );
 
             if (response["response"]["result"].AsString != "OK")
                 StoreFinalizationErrorAndThrow(transaction, response);
@@ -93,14 +89,6 @@ namespace Unisave.SteamMicrotransactions
 
             return transaction;
         }
-
-
-
-// =========================================================================
-//                    Don't worry about the code below
-// =========================================================================
-
-
 
         #region "InitiateTransaction implementation"
 
@@ -131,18 +119,23 @@ namespace Unisave.SteamMicrotransactions
             transaction.Save();
         }
 
-        private Response SendInitiationRequestToSteam(
+        private async Task<Response> SendInitiationRequestToSteam(
             SteamTransactionEntity transaction
         )
         {
             // https://partner.steamgames.com/doc/webapi/ISteamMicroTxn#InitTxn
 
-            var response = Http.Post(
+            var response = await Http.PostAsync(
                 GetSteamApiUrl() + "InitTxn/v3/",
                 BuildInitiationRequestBody(transaction)
             );
 
-            response.Throw();
+            if (!response.IsOk)
+            {
+                string body = await response.BodyAsync();
+                Log.Info("Steam API response body:\n" + body);
+                response.Throw();
+            }
 
             return response;
         }
@@ -153,10 +146,10 @@ namespace Unisave.SteamMicrotransactions
         {
             var body = new Dictionary<string, string>
             {
-                ["key"] = Env.GetString("STEAM_PUBLISHER_KEY"),
+                ["key"] = config.SteamPublisherKey.ToString(),
                 ["orderid"] = transaction.orderId.ToString(),
                 ["steamid"] = transaction.playerSteamId.ToString(),
-                ["appid"] = Env.GetString("STEAM_APP_ID"),
+                ["appid"] = config.SteamAppId.ToString(),
                 ["itemcount"] = transaction.items.Count.ToString(),
                 ["language"] = transaction.language,
                 ["currency"] = transaction.currency
@@ -243,23 +236,28 @@ namespace Unisave.SteamMicrotransactions
             Log.Info("Marked transaction as aborted.");
         }
 
-        private Response SendFinalizationRequestToSteam(
+        private async Task<Response> SendFinalizationRequestToSteam(
             SteamTransactionEntity transaction
         )
         {
             // https://partner.steamgames.com/doc/webapi/ISteamMicroTxn#FinalizeTxn
 
-            var response = Http.Post(
+            var response = await Http.PostAsync(
                 GetSteamApiUrl() + "FinalizeTxn/v2/",
                 new Dictionary<string, string>
                 {
-                    ["key"] = Env.GetString("STEAM_PUBLISHER_KEY"),
+                    ["key"] = config.SteamPublisherKey.ToString(),
                     ["orderid"] = transaction.orderId.ToString(),
-                    ["appid"] = Env.GetString("STEAM_APP_ID")
+                    ["appid"] = config.SteamAppId.ToString(),
                 }
             );
 
-            response.Throw();
+            if (!response.IsOk)
+            {
+                string body = await response.BodyAsync();
+                Log.Info("Steam API response body:\n" + body);
+                response.Throw();
+            }
 
             return response;
         }
@@ -340,28 +338,16 @@ namespace Unisave.SteamMicrotransactions
 
         #endregion
 
-        #region "Utilities"
-
         /// <summary>
         /// URL of the Steam microtransactions API, ending with a slash
         /// </summary>
         private string GetSteamApiUrl()
         {
             // base url for all Steam APIs
-            string steamApi = Env.GetString(
-                key: "STEAM_API_URL",
-                defaultValue: "https://partner.steam-api.com/"
-            );
-            steamApi = Str.Finish(steamApi, "/");
-
-            // use sandbox or not
-            bool useSandbox = Env.GetBool(
-                key: "STEAM_USE_MICROTRANSACTION_SANDBOX",
-                defaultValue: true
-            );
+            string steamApi = Str.Finish(config.SteamApiUrl, "/");
 
             // create the microtransactions API URL
-            if (useSandbox)
+            if (config.UseSandbox)
             {
                 return steamApi + "ISteamMicroTxnSandbox/";
             }
@@ -370,50 +356,5 @@ namespace Unisave.SteamMicrotransactions
                 return steamApi + "ISteamMicroTxn/";
             }
         }
-
-        [Serializable]
-        public class SteamMicrotransactionException : Exception
-        {
-            public SteamMicrotransactionException()
-                : this(
-                    "There was a problem with processing " +
-                    "a steam microtransaction."
-                )
-            {
-            }
-
-            public SteamMicrotransactionException(string message)
-                : base(message)
-            {
-            }
-
-            public SteamMicrotransactionException(
-                string message,
-                Exception inner
-            ) : base(message, inner)
-            {
-            }
-
-            public SteamMicrotransactionException(
-                string message,
-                ulong orderId,
-                string errorCode,
-                string errorDescription
-            ) : this(
-                $"{message}\n" +
-                $"[{errorCode}] {errorDescription}\n" +
-                $"Order ID: {orderId}"
-            )
-            {
-            }
-
-            protected SteamMicrotransactionException(
-                SerializationInfo info,
-                StreamingContext context) : base(info, context)
-            {
-            }
-        }
-
-        #endregion
     }
 }

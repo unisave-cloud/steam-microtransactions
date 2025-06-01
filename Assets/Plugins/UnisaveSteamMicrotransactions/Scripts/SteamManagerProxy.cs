@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using System.Reflection;
 
 namespace Unisave.SteamMicrotransactions
@@ -32,10 +33,22 @@ namespace Unisave.SteamMicrotransactions
 
         private static Type GetSteamManagerType()
         {
-            return Type.GetType("SteamManager") ?? throw new Exception(
+            return AppDomain.CurrentDomain.GetAssemblies()
+                .Select(assembly => assembly.GetType("SteamManager"))
+                .FirstOrDefault(t => t != null) ?? throw new Exception(
                 "Cannot find the `SteamManager` class. Make sure you have" +
                 " the Steamworks.NET library set up properly."
             );
+        }
+
+        /// <summary>
+        /// Helper method that creates the SteamManager game object if missing
+        /// </summary>
+        public static void EnsureExistsInScene()
+        {
+            // queries the .Initialized property which creates the instance
+            // if missing.
+            bool _ = Initialized;
         }
     }
 }

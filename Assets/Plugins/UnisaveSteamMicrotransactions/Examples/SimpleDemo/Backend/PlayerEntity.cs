@@ -14,5 +14,10 @@ namespace Unisave.SteamMicrotransactions.Examples.SimpleDemo
         /// Number of gold coins that the player owns
         /// </summary>
         public int goldCoins = 0;
+        
+        /// <summary>
+        /// Does the player have the premium account purchased?
+        /// </summary>
+        public bool hasPremium = false;
     }
 }

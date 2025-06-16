@@ -1,3 +1,4 @@
+using System;
 using Unisave.Facades;
 using Unisave.Facets;
 
@@ -37,6 +38,23 @@ namespace Unisave.SteamMicrotransactions.Examples.SimpleDemo
         public PlayerEntity WhoAmI()
         {
             return Auth.GetPlayer<PlayerEntity>();
+        }
+
+        /// <summary>
+        /// Resets the currently logged-in player's data
+        /// </summary>
+        public PlayerEntity ResetPlayerData()
+        {
+            var player = Auth.GetPlayer<PlayerEntity>();
+
+            if (player == null)
+                throw new InvalidOperationException("No logged-in player.");
+            
+            player.goldCoins = 0;
+            player.hasPremium = false;
+            player.Save();
+            
+            return player;
         }
     }
 }

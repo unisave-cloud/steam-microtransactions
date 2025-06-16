@@ -1,22 +1,56 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading.Tasks;
 using Unisave.Facades;
 using Unisave.Facets;
+using Unisave.Foundation;
 using Unisave.HttpClient;
 using Unisave.Utils;
 
 namespace Unisave.SteamMicrotransactions
 {
+    /// <summary>
+    /// Implements the "Steam purchasing server" as described by the Steam docs.
+    /// It's a part of your backend server, it talks to the Steamworks Web API
+    /// and is central to the handling of Steam Microtransactions.
+    /// It is responsible for initiating transactions from transaction proposals
+    /// and finalizing transactions after the player finished interacting with
+    /// the Steam Overlay where the player authorizes the purchase.
+    /// During transaction finalization, purchased products are given to the
+    /// player here on the server-side and the updated player state must then
+    /// be fetched from the server by the client.
+    /// </summary>
     public class SteamPurchasingServerFacet : Facet
     {
         private readonly SteamMicrotransactionsConfig config;
+        private readonly IContainer services;
         
-        public SteamPurchasingServerFacet(SteamMicrotransactionsConfig config)
+        public SteamPurchasingServerFacet(
+            SteamMicrotransactionsConfig config,
+            IContainer services
+        )
         {
             this.config = config;
+            this.services = services;
             
             config.LogValidationWarnings();
+        }
+
+        /// <summary>
+        /// Given a list of SteamProduct type full-class-names,
+        /// returns their localized metadata
+        /// </summary>
+        public List<LocalizedProductInfo> DownloadProductsInfo(
+            string currency,
+            string language,
+            List<string> productTypeClassNames
+        )
+        {
+            return productTypeClassNames.Select(className =>
+                SteamProduct.CreateInstance(className, services)
+                    .GetLocalizedInfo(currency: currency, language: language)
+            ).ToList();
         }
         
         /// <summary>
@@ -29,10 +63,8 @@ namespace Unisave.SteamMicrotransactions
         )
         {
             ValidateTransactionProposal(transaction);
-
-            // You can add additional data to the transaction entity
-            // e.g. the currently logged-in player ID
-            transaction.authenticatedPlayerId = Auth.Id();
+            
+            FillTransactionProposalWithServerSideData(transaction);
 
             StoreNewTransaction(transaction);
 
@@ -43,10 +75,11 @@ namespace Unisave.SteamMicrotransactions
 
             MarkTransactionAsInitiated(transaction, response);
 
-            // The player will be prompted by the Steam App to authorize
-            // and pay the transaction. Then Steam will notify your game
-            // via a Steamworks callback that is handled automatically
-            // by the SteamPurchasingClient class.
+            // The player will now be prompted by the Steam Overlay to authorize
+            // and pay the transaction. Then Steam will notify the game via
+            // a Steamworks callback which will cause the game to call the
+            // FinalizeTransaction facet method below to grant the purchased
+            // items to the player.
         }
 
         /// <summary>
@@ -55,16 +88,18 @@ namespace Unisave.SteamMicrotransactions
         /// with Steam and then gives the bought products to the player.
         /// </summary>
         /// <param name="orderId">The order being finalized</param>
-        /// <param name="authorized">Player authorized or aborted?</param>
+        /// <param name="playerAuthorizedTheTransactionInSteamOverlay">
+        /// Player authorized or aborted the transaction in the Steam overlay.
+        /// </param>
         /// <returns>The final transaction data</returns>
         public async Task<SteamTransactionEntity> FinalizeTransaction(
             ulong orderId,
-            bool authorized
+            bool playerAuthorizedTheTransactionInSteamOverlay
         )
         {
             var transaction = FindInitiatedTransaction(orderId);
 
-            if (!authorized)
+            if (!playerAuthorizedTheTransactionInSteamOverlay)
             {
                 MarkTransactionAsAborted(transaction);
 
@@ -80,10 +115,7 @@ namespace Unisave.SteamMicrotransactions
 
             MarkTransactionAsAuthorized(transaction);
 
-            GiveProductsToPlayer(transaction);
-
-            // Here the proper IVirtualProduct.GiveToPlayer(...) methods
-            // are called so make sure you implement them.
+            await GiveProductsToPlayer(transaction);
 
             MarkTransactionAsCompleted(transaction);
 
@@ -101,21 +133,93 @@ namespace Unisave.SteamMicrotransactions
                     "Given transaction has already been initiated."
                 );
 
-            if (transaction.playerSteamId == 0)
+            if (transaction.PlayerSteamId == 0)
                 throw new ArgumentException(
                     $"Given transaction does not have " +
-                    $"{nameof(transaction.playerSteamId)} specified."
+                    $"{nameof(transaction.PlayerSteamId)} specified."
                 );
 
-            if (transaction.items.Count == 0)
+            if (transaction.Items.Count == 0)
                 throw new ArgumentException(
                     "Given transaction has no items inside of it."
                 );
+            
+            if (string.IsNullOrEmpty(transaction.Currency))
+                throw new ArgumentException(
+                    "Given transaction has no currency specified."
+                );
+            
+            if (string.IsNullOrEmpty(transaction.Language))
+                throw new ArgumentException(
+                    "Given transaction has no language specified."
+                );
+            
+            foreach (var item in transaction.Items)
+                ValidateProposedTransactionItem(transaction, item);
         }
 
+        private void ValidateProposedTransactionItem(
+            SteamTransactionEntity transaction,
+            SteamTransactionItem item
+        )
+        {
+            SteamProduct product = SteamProduct.CreateInstance(
+                item.ProductTypeClassName,
+                services
+            );
+
+            LocalizedProductInfo productInfo = product.GetLocalizedInfo(
+                currency: transaction.Currency,
+                language: transaction.Language
+            );
+
+            if (item.ItemId != productInfo.ItemId)
+                throw new ArgumentException(
+                    "Item does not match the product in: 'ItemId'"
+                );
+            
+            if (item.UnitCost != productInfo.UnitCost)
+                throw new ArgumentException(
+                    "Item does not match the product in: 'ItemId'"
+                );
+            
+            if (item.Description != productInfo.Description)
+                throw new ArgumentException(
+                    "Item does not match the product in: 'ItemId'"
+                );
+            
+            if (item.Category != productInfo.Category)
+                throw new ArgumentException(
+                    "Item does not match the product in: 'ItemId'"
+                );
+            
+            if (item.Quantity <= 0)
+                throw new ArgumentException(
+                    "Item quantity must be a positive integer."
+                );
+            
+            // NOTE: TotalAmountInCents is re-calculated later
+        }
+
+        private void FillTransactionProposalWithServerSideData(
+            SteamTransactionEntity transaction
+        )
+        {
+            // Generate order id for the transaction
+            transaction.OrderId = SteamTransactionEntity.GenerateRandomOrderId();
+
+            // Remember the unisave-user that initiated the transaction
+            transaction.UnisavePlayerId = Auth.Id();
+            
+            // Recompute total value in cents for each item, to make sure
+            // the client does not sneak in a different cost.
+            foreach (var item in transaction.Items)
+                item.RecomputeTotalAmountInCents();
+        }
+        
         private void StoreNewTransaction(SteamTransactionEntity transaction)
         {
-            transaction.state = SteamTransactionEntity.BeingPreparedState;
+            transaction.State = SteamTransactionState.BeingPrepared;
             transaction.Save();
         }
 
@@ -147,24 +251,24 @@ namespace Unisave.SteamMicrotransactions
             var body = new Dictionary<string, string>
             {
                 ["key"] = config.SteamPublisherKey.ToString(),
-                ["orderid"] = transaction.orderId.ToString(),
-                ["steamid"] = transaction.playerSteamId.ToString(),
+                ["orderid"] = transaction.OrderId.ToString(),
+                ["steamid"] = transaction.PlayerSteamId.ToString(),
                 ["appid"] = config.SteamAppId.ToString(),
-                ["itemcount"] = transaction.items.Count.ToString(),
-                ["language"] = transaction.language,
-                ["currency"] = transaction.currency
+                ["itemcount"] = transaction.Items.Count.ToString(),
+                ["language"] = transaction.Language,
+                ["currency"] = transaction.Currency
             };
 
-            for (int i = 0; i < transaction.items.Count; i++)
+            for (int i = 0; i < transaction.Items.Count; i++)
             {
-                var item = transaction.items[i];
+                var item = transaction.Items[i];
 
-                body[$"itemid[{i}]"] = item.itemId.ToString();
-                body[$"qty[{i}]"] = item.quantity.ToString();
-                body[$"amount[{i}]"] = item.totalAmountInCents.ToString();
-                body[$"description[{i}]"] = item.description;
-                if (!string.IsNullOrWhiteSpace(item.category))
-                    body[$"category[{i}]"] = item.category;
+                body[$"itemid[{i}]"] = item.ItemId.ToString();
+                body[$"qty[{i}]"] = item.Quantity.ToString();
+                body[$"amount[{i}]"] = item.TotalAmountInCents.ToString();
+                body[$"description[{i}]"] = item.Description;
+                if (!string.IsNullOrWhiteSpace(item.Category))
+                    body[$"category[{i}]"] = item.Category;
             }
 
             return body;
@@ -175,18 +279,18 @@ namespace Unisave.SteamMicrotransactions
             Response response
         )
         {
-            transaction.state = SteamTransactionEntity.InitiationErrorState;
-            transaction.errorCode
+            transaction.State = SteamTransactionState.InitiationError;
+            transaction.ErrorCode
                 = response["response"]["error"]["errorcode"].AsString;
-            transaction.errorDescription
+            transaction.ErrorDescription
                 = response["response"]["error"]["errordesc"].AsString;
             transaction.Save();
 
             throw new SteamMicrotransactionException(
                 "Steam rejected transaction initiation.",
-                transaction.orderId,
-                transaction.errorCode,
-                transaction.errorDescription
+                transaction.OrderId,
+                transaction.ErrorCode,
+                transaction.ErrorDescription
             );
         }
 
@@ -195,8 +299,8 @@ namespace Unisave.SteamMicrotransactions
             Response response
         )
         {
-            transaction.state = SteamTransactionEntity.InitiatedState;
-            transaction.transactionId = ulong.Parse(
+            transaction.State = SteamTransactionState.Initiated;
+            transaction.TransactionId = ulong.Parse(
                 response["response"]["params"]["transid"].AsString
             );
             transaction.Save();
@@ -212,8 +316,8 @@ namespace Unisave.SteamMicrotransactions
         {
             var transaction = DB.TakeAll<SteamTransactionEntity>()
                 .Filter(t =>
-                    t.orderId == orderId &&
-                    t.state == SteamTransactionEntity.InitiatedState
+                    t.OrderId == orderId &&
+                    t.State == SteamTransactionState.Initiated
                 )
                 .First();
 
@@ -230,7 +334,7 @@ namespace Unisave.SteamMicrotransactions
             SteamTransactionEntity transaction
         )
         {
-            transaction.state = SteamTransactionEntity.AbortedState;
+            transaction.State = SteamTransactionState.Aborted;
             transaction.Save();
 
             Log.Info("Marked transaction as aborted.");
@@ -247,7 +351,7 @@ namespace Unisave.SteamMicrotransactions
                 new Dictionary<string, string>
                 {
                     ["key"] = config.SteamPublisherKey.ToString(),
-                    ["orderid"] = transaction.orderId.ToString(),
+                    ["orderid"] = transaction.OrderId.ToString(),
                     ["appid"] = config.SteamAppId.ToString(),
                 }
             );
@@ -267,18 +371,18 @@ namespace Unisave.SteamMicrotransactions
             Response response
         )
         {
-            transaction.state = SteamTransactionEntity.FinalizationErrorState;
-            transaction.errorCode
+            transaction.State = SteamTransactionState.FinalizationError;
+            transaction.ErrorCode
                 = response["response"]["error"]["errorcode"].AsString;
-            transaction.errorDescription
+            transaction.ErrorDescription
                 = response["response"]["error"]["errordesc"].AsString;
             transaction.Save();
 
             throw new SteamMicrotransactionException(
                 "Steam rejected transaction finalization.",
-                transaction.orderId,
-                transaction.errorCode,
-                transaction.errorDescription
+                transaction.OrderId,
+                transaction.ErrorCode,
+                transaction.ErrorDescription
             );
         }
 
@@ -286,43 +390,44 @@ namespace Unisave.SteamMicrotransactions
             SteamTransactionEntity transaction
         )
         {
-            transaction.state = SteamTransactionEntity.AuthorizedState;
+            transaction.State = SteamTransactionState.Authorized;
             transaction.Save();
 
             Log.Info("Marked transaction as authorized.");
         }
 
-        private void GiveProductsToPlayer(SteamTransactionEntity transaction)
+        private async Task GiveProductsToPlayer(
+            SteamTransactionEntity transaction
+        )
         {
-            foreach (var item in transaction.items)
+            // Create child IoC container that has the transaction entity
+            // registered so that it can be resolved from the product classes
+            // if necessary.
+            var childServices = services.CreateChildContainer();
+            childServices.RegisterInstance(transaction);
+            
+            // first, instantiate all item-product pairs
+            var itemProductPairs = transaction.Items.Select(
+                item => (item, SteamProduct.CreateInstance(
+                    item.ProductTypeClassName,
+                    childServices
+                ))
+            ).ToArray();
+            
+            // for each item, give the corresponding product to the player
+            foreach (var (item, product) in itemProductPairs)
             {
-                Type productType = Type.GetType(item.productClass);
-
-                if (productType == null)
-                    throw new Exception(
-                        $"Cannot find product {item.productClass}"
-                    );
-
-                var instance = (IVirtualProduct)Activator.CreateInstance(
-                    productType
+                Log.Info(
+                    $"Giving product {product.GetType().FullName} to the " +
+                    $"player in quantity {item.Quantity}x..."
                 );
+                
+                await product.GiveToPlayerAsync(item.Quantity);
 
-                var method = productType.GetMethod(
-                    nameof(IVirtualProduct.GiveToPlayer)
+                Log.Info(
+                    $"Product {product.GetType().FullName} has been " +
+                    $"given to the player."
                 );
-
-                if (method == null)
-                    throw new Exception(
-                        $"Class {item.productClass} does not contain " +
-                        $"method {nameof(IVirtualProduct.GiveToPlayer)}"
-                    );
-
-                for (int i = 0; i < item.quantity; i++)
-                {
-                    method.Invoke(instance, new object[] { transaction });
-
-                    Log.Info("Product has been given to the player.", item);
-                }
             }
         }
 
@@ -330,7 +435,7 @@ namespace Unisave.SteamMicrotransactions
             SteamTransactionEntity transaction
         )
         {
-            transaction.state = SteamTransactionEntity.CompletedState;
+            transaction.State = SteamTransactionState.Completed;
             transaction.Save();
 
             Log.Info("Marked transaction as completed.");

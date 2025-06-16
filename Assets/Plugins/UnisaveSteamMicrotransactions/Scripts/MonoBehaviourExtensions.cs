@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Threading.Tasks;
 using Steamworks;
 using Unisave.Facets;
@@ -21,16 +22,45 @@ namespace Unisave.SteamMicrotransactions
         /// The Steamworks callback for transaction finalization
         /// </summary>
         private static Callback<MicroTxnAuthorizationResponse_t> callback;
+
+        /// <summary>
+        /// Downloads metadata about a steam product, localized into the
+        /// specified currency and language.
+        /// </summary>
+        public static async Task<LocalizedProductInfo> DownloadProductInfo<TProduct>(
+            this MonoBehaviour monoBehaviour,
+            string currency,
+            string language
+        ) where TProduct : SteamProduct
+        {
+            List<string> typeNames = new List<string>() {
+                typeof(TProduct).FullName
+            };
+            
+            var infos = await monoBehaviour.CallFacet(
+                (SteamPurchasingServerFacet f) => f.DownloadProductsInfo(
+                    currency,
+                    language,
+                    typeNames
+                )
+            );
+            
+            return infos[0];
+        }
         
         /// <summary>
-        /// Initiates a Steam microtransaction, opening the Steam Overlay
-        /// and communicating with Steam servers and Unisave backend server.
-        /// Returns when the transaction completes (successfully or not).
+        /// Accepts a Steam microtransaction proposal as an argument and
+        /// performs the UI flow with the player. First, it sends the proposal
+        /// to the Unisave steam purchasing server, initiates the transaction.
+        /// This opens the Steam Overlay UI. They player now either checks out
+        /// or aborts. Then the transaction is finalized and if successful,
+        /// the purchased items are given to the player. Then this method
+        /// returns with a description of what happened.
         /// </summary>
         /// <param name="monoBehaviour"></param>
         /// <param name="transactionProposal"></param>
         /// <returns></returns>
-        public static UnisaveOperation<TransactionResult> InitiateSteamMicrotransaction(
+        public static UnisaveOperation<TransactionResult> DoTheSteamMicrotransactionUiFlow(
             this MonoBehaviour monoBehaviour,
             SteamTransactionEntity transactionProposal
         ) => new UnisaveOperation<TransactionResult>(monoBehaviour, async () =>
@@ -93,11 +123,14 @@ namespace Unisave.SteamMicrotransactions
             SteamTransactionEntity transaction;
             try
             {
+                bool playerAuthorizedTheTransactionInSteamOverlay
+                    = response.m_bAuthorized == 1;
+                
                 transaction = await FacetClient.CallFacet(
                     null, // no caller -> always return from the await call
                     (SteamPurchasingServerFacet f) => f.FinalizeTransaction(
                         response.m_ulOrderID,
-                        response.m_bAuthorized == 1
+                        playerAuthorizedTheTransactionInSteamOverlay
                     )
                 );
             }

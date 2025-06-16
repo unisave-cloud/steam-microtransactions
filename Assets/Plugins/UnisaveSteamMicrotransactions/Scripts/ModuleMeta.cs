@@ -8,7 +8,7 @@ namespace Unisave.SteamMicrotransactions
         /// <summary>
         /// Version of this module
         /// </summary>
-        public static readonly string Version = "1.0.0";
+        public static readonly string Version = "1.0.0-dev";
 
         /// <summary>
         /// The version of Steamworks.NET this module was last tested against

@@ -1246,7 +1246,7 @@ MonoBehaviour:
       - m_Target: {fileID: 1696377483}
         m_TargetAssemblyTypeName: Unisave.SteamMicrotransactions.Examples.SimpleDemo.ExamplePurchasingController,
           Assembly-CSharp-firstpass
-        m_MethodName: CloseUnityEditorWarningDialog
+        m_MethodName: OnCloseUnityEditorWarningDialogButtonClicked
         m_Mode: 1
         m_Arguments:
           m_ObjectArgument: {fileID: 0}

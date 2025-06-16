@@ -16,7 +16,7 @@ namespace Unisave.SteamMicrotransactions
         /// Get resolved when the Steamworks callback for transaction
         /// finalization is invoked
         /// </summary>
-        private static TaskCompletionSource<TransactionResult> callbackTcs = null;
+        private static TaskCompletionSource<TransactionFlowResult> callbackTcs = null;
         
         /// <summary>
         /// The Steamworks callback for transaction finalization
@@ -60,10 +60,10 @@ namespace Unisave.SteamMicrotransactions
         /// <param name="monoBehaviour"></param>
         /// <param name="transactionProposal"></param>
         /// <returns></returns>
-        public static UnisaveOperation<TransactionResult> DoTheSteamMicrotransactionUiFlow(
+        public static UnisaveOperation<TransactionFlowResult> DoTheSteamMicrotransactionUiFlow(
             this MonoBehaviour monoBehaviour,
             SteamTransactionEntity transactionProposal
-        ) => new UnisaveOperation<TransactionResult>(monoBehaviour, async () =>
+        ) => new UnisaveOperation<TransactionFlowResult>(monoBehaviour, async () =>
         {
             if (!SteamManagerProxy.Initialized)
             {
@@ -82,7 +82,7 @@ namespace Unisave.SteamMicrotransactions
             
             try
             {
-                callbackTcs = new TaskCompletionSource<TransactionResult>();
+                callbackTcs = new TaskCompletionSource<TransactionFlowResult>();
                 RegisterCallback();
                 
                 await monoBehaviour.CallFacet((SteamPurchasingServerFacet f) =>
@@ -93,7 +93,7 @@ namespace Unisave.SteamMicrotransactions
             }
             catch (Exception e)
             {
-                return TransactionResult.FromException(e);
+                return TransactionFlowResult.FromException(e);
             }
             finally
             {
@@ -136,19 +136,19 @@ namespace Unisave.SteamMicrotransactions
             }
             catch (Exception e)
             {
-                callbackTcs.SetResult(TransactionResult.FromException(e));
+                callbackTcs.SetResult(TransactionFlowResult.FromException(e));
                 return;
             }
         
             // transaction has been aborted by the player
             if (response.m_bAuthorized != 1)
             {
-                callbackTcs.SetResult(TransactionResult.FromAbort());
+                callbackTcs.SetResult(TransactionFlowResult.FromAbort());
                 return;
             }
 
             // everything went according to plans
-            callbackTcs.SetResult(TransactionResult.FromSuccess(transaction));
+            callbackTcs.SetResult(TransactionFlowResult.FromSuccess(transaction));
         }
 
         private static void RegisterCallback()

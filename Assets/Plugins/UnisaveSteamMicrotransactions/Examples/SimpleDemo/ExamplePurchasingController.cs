@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 using Steamworks;
 using TMPro;
 using Unisave.Facets;
+using Unisave.Serialization;
 using UnityEngine;
 using UnityEngine.UI;
 
@@ -12,6 +13,12 @@ namespace Unisave.SteamMicrotransactions.Examples.SimpleDemo
 {
     public class ExamplePurchasingController : MonoBehaviour
     {
+        /// <summary>
+        /// When true, the warning dialog is rendered as open
+        /// (when the UpdateUI method is called)
+        /// </summary>
+        private bool isWarningDialogOpen;
+        
         /// <summary>
         /// The logged-in player's data, null if not logged in
         /// </summary>
@@ -27,7 +34,7 @@ namespace Unisave.SteamMicrotransactions.Examples.SimpleDemo
         /// </summary>
         private string currency;
 
-        // information about both products, downloaded from the server
+        // information about products, downloaded from the server
         private LocalizedProductInfo goldSackInfo;
         private LocalizedProductInfo premiumAccountInfo;
         
@@ -50,15 +57,20 @@ namespace Unisave.SteamMicrotransactions.Examples.SimpleDemo
             SteamManagerProxy.EnsureExistsInScene();
 
             // Show the warning message if the scene is launched from Unity
-            if (Application.isEditor)
-                DisplayUnityEditorWarningDialog();
-            else
-                CloseUnityEditorWarningDialog();
+            isWarningDialogOpen = Application.isEditor;
             
             // initialize the state
             loggedInPlayer = null;
             language = "en";
             currency = "USD";
+
+            UpdateUI();
+        }
+
+        public void OnCloseUnityEditorWarningDialogButtonClicked()
+        {
+            isWarningDialogOpen = false;
+            UpdateUI();
         }
 
         public async void OnLoginButtonClicked()
@@ -68,12 +80,12 @@ namespace Unisave.SteamMicrotransactions.Examples.SimpleDemo
             guideText.text = "Logging in...\n";
             await this.CallFacet((DummyAuthFacet f) => f.LoginAsJohnDoe());
             
-            guideText.text = "Fetching player...\n";
+            guideText.text += "Fetching player...\n";
             loggedInPlayer = await this.CallFacet(
                 (DummyAuthFacet f) => f.WhoAmI()
             );
             
-            guideText.text = "Fetching product information...\n";
+            guideText.text += "Fetching product information...\n";
             goldSackInfo = await this.DownloadProductInfo<GoldSackProduct>(
                 currency: currency,
                 language: language
@@ -83,14 +95,9 @@ namespace Unisave.SteamMicrotransactions.Examples.SimpleDemo
                 language: language
             );
             
-            // display the downloaded price
-            goldSackPriceText.text = $"{goldSackInfo.UnitCost} {goldSackInfo.Currency}";
-            premiumAccountPriceText.text = $"{premiumAccountInfo.UnitCost} {premiumAccountInfo.Currency}";
-            
-            UpdateLoggedInUI();
-            
             guideText.text = $"Logged in as: {loggedInPlayer.name}\n" +
                              $"({loggedInPlayer.EntityId})";
+            UpdateUI();
         }
 
         public async void OnResetPlayerButtonClicked()
@@ -100,7 +107,7 @@ namespace Unisave.SteamMicrotransactions.Examples.SimpleDemo
             loggedInPlayer = await this.CallFacet(
                 (DummyAuthFacet f) => f.ResetPlayerData()
             );
-            UpdateLoggedInUI();
+            UpdateUI();
             
             guideText.text += "Done.\n";
         }
@@ -139,63 +146,68 @@ namespace Unisave.SteamMicrotransactions.Examples.SimpleDemo
         {
             guideText.text = "Opening Steam Overlay...\n";
             
-            var result = await this.DoTheSteamMicrotransactionUiFlow(
+            var flowResult = await this.DoTheSteamMicrotransactionUiFlow(
                 transactionProposal
             );
 
-            // The player just closed the Steam Overlay without checking out.
-            if (result.WasAborted)
+            // The player just closed the Steam Overlay without paying.
+            if (flowResult.WasAborted)
             {
                 guideText.text += "Player aborted the transaction.\n";
+                return;
+            }
+            
+            // There was some problem with the transaction.
+            // Show the error to the player so that he can send you a screenshot.
+            if (flowResult.WasError)
+            {
+                guideText.text += "TRANSACTION ERROR. See the Unity console.\n";
+                Debug.LogError("TRANSACTION ERROR: " + flowResult.ErrorMessage);
                 return;
             }
 
             // The player finalized the transaction, purchased items have been
             // added to their account, we now need to reload the account.
-            if (result.WasSuccess)
+            guideText.text += "Transaction was successful.\n";
+            Debug.Log(
+                "The completed transaction entity: " +
+                Serializer.ToJsonString(flowResult.Transaction)
+            );
+            guideText.text += "Reloading the player...\n";
+            loggedInPlayer = await this.CallFacet(
+                (DummyAuthFacet f) => f.WhoAmI()
+            );
+            guideText.text += "Done.\n";
+            
+            UpdateUI();
+        }
+
+        /// <summary>
+        /// Updates the user interface to match the fields in this behaviour
+        /// </summary>
+        private void UpdateUI()
+        {
+            // the warning dialog
+            if (isWarningDialogOpen)
             {
-                guideText.text += "Transaction was successful.\n";
-                guideText.text += "Reloading the player...\n";
-                loggedInPlayer = await this.CallFacet(
-                    (DummyAuthFacet f) => f.WhoAmI()
-                );
-                UpdateLoggedInUI();
-                guideText.text += "Done.\n";
+                unityEditorWarningPanel.SetActive(true);
+                guidePanel.SetActive(false);
+                loginButton.gameObject.SetActive(false);
+                cardsContainer.SetActive(false);
                 return;
             }
             
-            // Else - There was an unexpected error. Show that error to the
-            // player so that they can send you a screenshot.
-            guideText.text += "TRANSACTION ERROR. See the Unity console.\n";
-            Debug.LogError("TRANSACTION ERROR: " + result.Error);
-        }
-
-        private void DisplayUnityEditorWarningDialog()
-        {
-            unityEditorWarningPanel.SetActive(true);
-            guidePanel.SetActive(false);
-            loginButton.gameObject.SetActive(false);
-            cardsContainer.SetActive(false);
-        }
-
-        public void CloseUnityEditorWarningDialog()
-        {
-            unityEditorWarningPanel.SetActive(false);
-            guidePanel.SetActive(true);
-            loginButton.gameObject.SetActive(true);
-            cardsContainer.SetActive(false);
-        }
-
-        private void UpdateLoggedInUI()
-        {
-            // check that this method is not called in incorrect state
+            // the login screen
             if (loggedInPlayer == null)
             {
-                Debug.LogError(
-                    "Cannot render logged-in UI, no player is logged in."
-                );
+                unityEditorWarningPanel.SetActive(false);
+                guidePanel.SetActive(true);
+                loginButton.gameObject.SetActive(true);
+                cardsContainer.SetActive(false);
                 return;
             }
+            
+            // === now we are in the logged-in screen ===
             
             // update visibility of top-level containers
             unityEditorWarningPanel.SetActive(false);
@@ -207,6 +219,8 @@ namespace Unisave.SteamMicrotransactions.Examples.SimpleDemo
             playerDataText.text = $"{loggedInPlayer.name}\n" +
                                   $"Gold: {loggedInPlayer.goldCoins}\n" + 
                                   $"Premium: {loggedInPlayer.hasPremium}";
+            goldSackPriceText.text = $"{goldSackInfo.UnitCost} {goldSackInfo.Currency}";
+            premiumAccountPriceText.text = $"{premiumAccountInfo.UnitCost} {premiumAccountInfo.Currency}";
             resetPlayerButton.interactable = loggedInPlayer.hasPremium
                                              || loggedInPlayer.goldCoins > 0;
             purchasePremiumButton.interactable = !loggedInPlayer.hasPremium;

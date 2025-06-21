@@ -190,6 +190,32 @@ namespace Unisave.SteamMicrotransactions
         /// this method can read the transaction entity.</param>
         /// <param name="action">The code block that this method wraps,
         /// that actually grants the purchased products.</param>
+        public static Task GiveProductsToPlayerClientSide(
+            this MonoBehaviour monoBehaviour,
+            CheckoutFlowResult flowResult,
+            Action action
+        )
+        {
+            return monoBehaviour.GiveProductsToPlayerClientSide(
+                flowResult,
+                () => {
+                    action.Invoke();
+                    return Task.CompletedTask;
+                }
+            );
+        }
+        
+        /// <summary>
+        /// Wrap your client-side product-granting code in this method to
+        /// report exceptions and success to the server to update the
+        /// transaction state appropriately. This should be done right after
+        /// the DoSteamCheckoutFlow method returns and does so successfully.
+        /// </summary>
+        /// <param name="monoBehaviour"></param>
+        /// <param name="flowResult">The result of the checkout flow, so that
+        /// this method can read the transaction entity.</param>
+        /// <param name="action">The code block that this method wraps,
+        /// that actually grants the purchased products.</param>
         public static async Task GiveProductsToPlayerClientSide(
             this MonoBehaviour monoBehaviour,
             CheckoutFlowResult flowResult,
@@ -216,7 +242,14 @@ namespace Unisave.SteamMicrotransactions
             try
             {
                 // give products to player
+                Debug.Log(
+                    "Giving products client-side to the player for " +
+                    "transaction " + transaction.EntityId
+                );
+                
                 await action.Invoke();
+                
+                Debug.Log("Products have been given client-side.");
             }
             catch (Exception e)
             {

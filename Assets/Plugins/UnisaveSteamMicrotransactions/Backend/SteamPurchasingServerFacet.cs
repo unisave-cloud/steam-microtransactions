@@ -187,6 +187,8 @@ namespace Unisave.SteamMicrotransactions
             // change the state
             transaction.State = SteamTransactionState.ClientSideCompleted;
             transaction.Save();
+            
+            Log.Info("Marked transaction as client-side-completed.");
         }
         
         #region "InitiateTransaction implementation"

@@ -5,7 +5,7 @@ namespace Unisave.SteamMicrotransactions
     /// <summary>
     /// Holds the result of a Steam microtransaction
     /// </summary>
-    public class TransactionFlowResult
+    public class CheckoutFlowResult
     {
         /// <summary>
         /// Transaction entity at its latest known state
@@ -37,29 +37,29 @@ namespace Unisave.SteamMicrotransactions
         /// </summary>
         public bool WasAborted { get; set; }
 
-        public static TransactionFlowResult FromSuccess(
+        public static CheckoutFlowResult FromSuccess(
             SteamTransactionEntity transaction
         )
         {
-            return new TransactionFlowResult() {
+            return new CheckoutFlowResult() {
                 Transaction = transaction,
                 ErrorMessage = null,
                 WasAborted = false
             };
         }
         
-        public static TransactionFlowResult FromException(Exception e)
+        public static CheckoutFlowResult FromException(Exception e)
         {
-            return new TransactionFlowResult() {
+            return new CheckoutFlowResult() {
                 Transaction = null,
                 ErrorMessage = e.Message,
                 WasAborted = false
             };
         }
         
-        public static TransactionFlowResult FromAbort()
+        public static CheckoutFlowResult FromAbort()
         {
-            return new TransactionFlowResult() {
+            return new CheckoutFlowResult() {
                 Transaction = null,
                 ErrorMessage = "You've aborted the transaction.",
                 WasAborted = true

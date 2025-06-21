@@ -146,7 +146,7 @@ namespace Unisave.SteamMicrotransactions.Examples.SimpleDemo
         {
             guideText.text = "Opening Steam Overlay...\n";
             
-            var flowResult = await this.DoTheSteamMicrotransactionUiFlow(
+            var flowResult = await this.DoSteamCheckoutFlow(
                 transactionProposal
             );
 

@@ -1,8 +1,10 @@
 using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
+using LightJson;
 using Steamworks;
 using Unisave.Facets;
+using Unisave.Serialization;
 using UnityEngine;
 
 namespace Unisave.SteamMicrotransactions
@@ -12,17 +14,6 @@ namespace Unisave.SteamMicrotransactions
     /// </summary>
     public static class MonoBehaviourExtensions
     {
-        /// <summary>
-        /// Get resolved when the Steamworks callback for transaction
-        /// finalization is invoked
-        /// </summary>
-        private static TaskCompletionSource<TransactionFlowResult> callbackTcs = null;
-        
-        /// <summary>
-        /// The Steamworks callback for transaction finalization
-        /// </summary>
-        private static Callback<MicroTxnAuthorizationResponse_t> callback;
-
         /// <summary>
         /// Downloads metadata about a steam product, localized into the
         /// specified currency and language.
@@ -48,6 +39,19 @@ namespace Unisave.SteamMicrotransactions
             return infos[0];
         }
         
+        #region "Checkout flow and its callbacks"
+        
+        /// <summary>
+        /// Get resolved when the Steamworks callback for transaction
+        /// finalization is invoked
+        /// </summary>
+        private static TaskCompletionSource<CheckoutFlowResult> callbackTcs = null;
+        
+        /// <summary>
+        /// The Steamworks callback for transaction finalization
+        /// </summary>
+        private static Callback<MicroTxnAuthorizationResponse_t> callback;
+        
         /// <summary>
         /// Accepts a Steam microtransaction proposal as an argument and
         /// performs the UI flow with the player. First, it sends the proposal
@@ -60,10 +64,10 @@ namespace Unisave.SteamMicrotransactions
         /// <param name="monoBehaviour"></param>
         /// <param name="transactionProposal"></param>
         /// <returns></returns>
-        public static UnisaveOperation<TransactionFlowResult> DoTheSteamMicrotransactionUiFlow(
+        public static UnisaveOperation<CheckoutFlowResult> DoSteamCheckoutFlow(
             this MonoBehaviour monoBehaviour,
             SteamTransactionEntity transactionProposal
-        ) => new UnisaveOperation<TransactionFlowResult>(monoBehaviour, async () =>
+        ) => new UnisaveOperation<CheckoutFlowResult>(monoBehaviour, async () =>
         {
             if (!SteamManagerProxy.Initialized)
             {
@@ -82,7 +86,7 @@ namespace Unisave.SteamMicrotransactions
             
             try
             {
-                callbackTcs = new TaskCompletionSource<TransactionFlowResult>();
+                callbackTcs = new TaskCompletionSource<CheckoutFlowResult>();
                 RegisterCallback();
                 
                 await monoBehaviour.CallFacet((SteamPurchasingServerFacet f) =>
@@ -93,7 +97,7 @@ namespace Unisave.SteamMicrotransactions
             }
             catch (Exception e)
             {
-                return TransactionFlowResult.FromException(e);
+                return CheckoutFlowResult.FromException(e);
             }
             finally
             {
@@ -136,19 +140,19 @@ namespace Unisave.SteamMicrotransactions
             }
             catch (Exception e)
             {
-                callbackTcs.SetResult(TransactionFlowResult.FromException(e));
+                callbackTcs.SetResult(CheckoutFlowResult.FromException(e));
                 return;
             }
         
             // transaction has been aborted by the player
             if (response.m_bAuthorized != 1)
             {
-                callbackTcs.SetResult(TransactionFlowResult.FromAbort());
+                callbackTcs.SetResult(CheckoutFlowResult.FromAbort());
                 return;
             }
 
             // everything went according to plans
-            callbackTcs.SetResult(TransactionFlowResult.FromSuccess(transaction));
+            callbackTcs.SetResult(CheckoutFlowResult.FromSuccess(transaction));
         }
 
         private static void RegisterCallback()
@@ -171,6 +175,74 @@ namespace Unisave.SteamMicrotransactions
                 callback.Dispose();
                 callback = null;
             }
+        }
+        
+        #endregion
+
+        /// <summary>
+        /// Wrap your client-side product-granting code in this method to
+        /// report exceptions and success to the server to update the
+        /// transaction state appropriately. This should be done right after
+        /// the DoSteamCheckoutFlow method returns and does so successfully.
+        /// </summary>
+        /// <param name="monoBehaviour"></param>
+        /// <param name="flowResult">The result of the checkout flow, so that
+        /// this method can read the transaction entity.</param>
+        /// <param name="action">The code block that this method wraps,
+        /// that actually grants the purchased products.</param>
+        public static async Task GiveProductsToPlayerClientSide(
+            this MonoBehaviour monoBehaviour,
+            CheckoutFlowResult flowResult,
+            Func<Task> action
+        )
+        {
+            // check transaction was successful
+            if (!flowResult.WasSuccess)
+                throw new ArgumentException(
+                    "Cannot give products to player because the " +
+                    "transaction did not succeed."
+                );
+            
+            // the transaction that we work with
+            SteamTransactionEntity transaction = flowResult.Transaction;
+
+            // check the transaction is in the proper state
+            // (this should be the case, unless someone gave us weird data)
+            if (transaction.State != SteamTransactionState.Completed)
+                throw new InvalidOperationException(
+                    "Only completed transactions can be client-side completed."
+                );
+
+            try
+            {
+                // give products to player
+                await action.Invoke();
+            }
+            catch (Exception e)
+            {
+                // prepare payload
+                JsonObject exception = Serializer.ToJson<Exception>(e);
+                
+                // upload the exception to the server
+                await monoBehaviour.CallFacet(
+                    (SteamPurchasingServerFacet f) => f.UploadClientException(
+                        transaction.OrderId,
+                        transaction.EntityId,
+                        exception
+                    )
+                );
+                
+                // let the exception propagate upward
+                throw;
+            }
+            
+            // report success
+            await monoBehaviour.CallFacet(
+                (SteamPurchasingServerFacet f) => f.NotifyOfClientSideCompletion(
+                    transaction.OrderId,
+                    transaction.EntityId
+                )
+            );
         }
     }
 }

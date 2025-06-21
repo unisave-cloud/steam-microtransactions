@@ -2,10 +2,12 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
+using LightJson;
 using Unisave.Facades;
 using Unisave.Facets;
 using Unisave.Foundation;
 using Unisave.HttpClient;
+using Unisave.Serialization;
 using Unisave.Utils;
 
 namespace Unisave.SteamMicrotransactions
@@ -68,12 +70,17 @@ namespace Unisave.SteamMicrotransactions
 
             StoreNewTransaction(transaction);
 
-            Response response = await SendInitiationRequestToSteam(transaction);
+            await CaptureExceptions(transaction, async () =>
+            {
+                Response response = await SendInitiationRequestToSteam(
+                    transaction
+                );
 
-            if (response["response"]["result"].AsString != "OK")
-                StoreInitiationErrorAndThrow(transaction, response);
+                if (response["response"]["result"].AsString != "OK")
+                    StoreInitiationErrorAndThrow(transaction, response);
 
-            MarkTransactionAsInitiated(transaction, response);
+                MarkTransactionAsInitiated(transaction, response);
+            });
 
             // The player will now be prompted by the Steam Overlay to authorize
             // and pay the transaction. Then Steam will notify the game via
@@ -106,22 +113,82 @@ namespace Unisave.SteamMicrotransactions
                 return transaction;
             }
 
-            Response response = await SendFinalizationRequestToSteam(
-                transaction
-            );
+            await CaptureExceptions(transaction, async () =>
+            {
+                Response response = await SendFinalizationRequestToSteam(
+                    transaction
+                );
 
-            if (response["response"]["result"].AsString != "OK")
-                StoreFinalizationErrorAndThrow(transaction, response);
+                if (response["response"]["result"].AsString != "OK")
+                    StoreFinalizationErrorAndThrow(transaction, response);
 
-            MarkTransactionAsAuthorized(transaction);
+                MarkTransactionAsAuthorized(transaction);
 
-            await GiveProductsToPlayer(transaction);
+                await GiveProductsToPlayer(transaction);
 
-            MarkTransactionAsCompleted(transaction);
+                MarkTransactionAsCompleted(transaction);
+            });
 
             return transaction;
         }
 
+        /// <summary>
+        /// Call this method to upload an exception that occured in the client
+        /// code. Entity ID, and for security also order ID is required.
+        /// The uploaded exception must be already serialized into a JSON object.
+        /// </summary>
+        public void UploadClientException(
+            ulong orderId,
+            string entityId,
+            JsonObject exception
+        )
+        {
+            // find the entity in the database
+            var transaction = FindTransaction(orderId, entityId);
+            
+            // if it already had an exception do nothing
+            if (transaction.State == SteamTransactionState.Exception)
+            {
+                Log.Warning(
+                    $"Ignoring exception upload for transaction {entityId} " +
+                    $"because it already has an exception."
+                );
+                return;
+            }
+            
+            // store the exception
+            transaction.Exception = exception;
+            transaction.StateBeforeException = transaction.State;
+            transaction.State = SteamTransactionState.Exception;
+            transaction.Save();
+        }
+
+        /// <summary>
+        /// This is called for client-side player data transactions,
+        /// after the products are given to the player client-side.
+        /// It changes the state of the transaction in the database.
+        /// </summary>
+        public void NotifyOfClientSideCompletion(ulong orderId, string entityId)
+        {
+            // find the entity in the database
+            var transaction = FindTransaction(orderId, entityId);
+            
+            // it has to be in the "completed" state
+            if (transaction.State != SteamTransactionState.Completed)
+            {
+                Log.Warning(
+                    $"Ignoring client completion notification for {entityId} " +
+                    $"because it is not in the completed state. " +
+                    $"It is in state: {transaction.State}"
+                );
+                return;
+            }
+            
+            // change the state
+            transaction.State = SteamTransactionState.ClientSideCompleted;
+            transaction.Save();
+        }
+        
         #region "InitiateTransaction implementation"
 
         private void ValidateTransactionProposal(
@@ -286,7 +353,7 @@ namespace Unisave.SteamMicrotransactions
                 = response["response"]["error"]["errordesc"].AsString;
             transaction.Save();
 
-            throw new SteamMicrotransactionException(
+            throw new SteamApiErrorException(
                 "Steam rejected transaction initiation.",
                 transaction.OrderId,
                 transaction.ErrorCode,
@@ -322,7 +389,7 @@ namespace Unisave.SteamMicrotransactions
                 .First();
 
             if (transaction == null)
-                throw new SteamMicrotransactionException(
+                throw new ArgumentException(
                     $"No initiated transaction with " +
                     $"order id {orderId} was found."
                 );
@@ -378,7 +445,7 @@ namespace Unisave.SteamMicrotransactions
                 = response["response"]["error"]["errordesc"].AsString;
             transaction.Save();
 
-            throw new SteamMicrotransactionException(
+            throw new SteamApiErrorException(
                 "Steam rejected transaction finalization.",
                 transaction.OrderId,
                 transaction.ErrorCode,
@@ -459,6 +526,62 @@ namespace Unisave.SteamMicrotransactions
             else
             {
                 return steamApi + "ISteamMicroTxn/";
+            }
+        }
+        
+        /// <summary>
+        /// Finds a transaction by its order ID and entity ID
+        /// (both for better security - entity ID can be guessed, both cannot)
+        /// </summary>
+        private SteamTransactionEntity FindTransaction(
+            ulong orderId,
+            string entityId
+        )
+        {
+            var transaction = DB.Find<SteamTransactionEntity>(entityId);
+            
+            if (transaction == null || transaction.OrderId != orderId)
+                throw new ArgumentException(
+                    $"No transaction with ID {entityId} and " +
+                    $"order id {orderId} was found."
+                );
+
+            return transaction;
+        }
+
+        /// <summary>
+        /// Captures unexpected exceptions and sets the transaction state
+        /// to "exception" and stores the exception within the entity.
+        /// </summary>
+        private async Task CaptureExceptions(
+            SteamTransactionEntity transaction,
+            Func<Task> action
+        )
+        {
+            try
+            {
+                await action.Invoke();
+            }
+            catch (SteamApiErrorException)
+            {
+                // we do not capture Steam API errors,
+                // those are captured manually in the code above
+                throw;
+            }
+            catch (Exception e)
+            {
+                // do nothing, if the transaction already had an exception
+                if (transaction.State == SteamTransactionState.Exception)
+                    throw;
+                
+                // store the exception
+                transaction.Exception = Serializer.ToJson<Exception>(e);
+                transaction.StateBeforeException = transaction.State;
+                transaction.State = SteamTransactionState.Exception;
+                transaction.Save();
+                
+                // let the exception propagate upward
+                throw;
             }
         }
     }

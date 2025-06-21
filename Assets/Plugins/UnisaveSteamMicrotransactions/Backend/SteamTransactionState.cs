@@ -42,8 +42,21 @@ namespace Unisave.SteamMicrotransactions
 
         /// <summary>
         /// The purchased products have been given to the player,
-        /// the transaction is dead now.
+        /// the transaction can only be further completed on the client-side,
+        /// although that isn't necessary.
         /// </summary>
         public const string Completed = "completed";
+        
+        /// <summary>
+        /// The purchased products have been given to the player
+        /// on the client side as well. The transaction is dead now.
+        /// </summary>
+        public const string ClientSideCompleted = "client-side-completed";
+        
+        /// <summary>
+        /// An unexpected exception was raised somewhere during the transaction
+        /// processing. The transaction is dead now.
+        /// </summary>
+        public const string Exception = "exception";
     }
 }

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using LightJson;
 using Unisave.Entities;
 
 namespace Unisave.SteamMicrotransactions
@@ -66,20 +67,32 @@ namespace Unisave.SteamMicrotransactions
             = new List<SteamTransactionItem>();
 
         /// <summary>
-        /// Steam transaction error code, if an error occured.
-        /// 
-        /// The list of codes:
+        /// Steam transaction error code, if an error was returned
+        /// by the Steam API. The list of codes:
         /// https://partner.steamgames.com/doc/features/microtransactions/implementation#error_codes
         /// </summary>
         public string ErrorCode { get; set; }
 
         /// <summary>
-        /// Description of the steam error, if an error occured
-        ///
-        /// The list of errors:
+        /// Description of the steam error, if an error was returned
+        /// by the Steam API. The list of errors:
         /// https://partner.steamgames.com/doc/features/microtransactions/implementation#error_codes
         /// </summary>
         public string ErrorDescription { get; set; }
+        
+        /// <summary>
+        /// Serialized exception if an unexpected code-exception was raised.
+        /// Catches both server-side and client-side exceptions. Is null
+        /// if no exception occured.
+        /// </summary>
+        public JsonObject Exception { get; set; }
+        
+        /// <summary>
+        /// What the value of the State field was, when the exception
+        /// was raised. Because exception transitions the state to "exception".
+        /// Null if no exception occured.
+        /// </summary>
+        public string StateBeforeException { get; set; }
 
         /// <summary>
         /// Generates a random order ID uint value.

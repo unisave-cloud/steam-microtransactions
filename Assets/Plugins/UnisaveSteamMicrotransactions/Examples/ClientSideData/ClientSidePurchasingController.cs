@@ -157,7 +157,7 @@ namespace Unisave.SteamMicrotransactions.Examples.ClientSideData
             
             // update cards content
             playerDataText.text = $"Diamonds: {playerDiamonds}";
-            diamondsPriceText.text = $"{diamondsInfo.UnitCost} {diamondsInfo.Currency}";
+            diamondsPriceText.text = $"{diamondsInfo?.UnitCost} {diamondsInfo?.Currency}";
             resetPlayerButton.interactable = playerDiamonds > 0;
             purchaseDiamondsButton.interactable = diamondsInfo != null;
         }

@@ -60,7 +60,7 @@ namespace Unisave.SteamMicrotransactions
         /// to initiate a new transaction
         /// </summary>
         /// <param name="transaction">Proposal of a new transaction</param>
-        public async Task InitiateTransaction(
+        public async Task<SteamTransactionEntity> InitiateTransaction(
             SteamTransactionEntity transaction
         )
         {
@@ -87,6 +87,8 @@ namespace Unisave.SteamMicrotransactions
             // a Steamworks callback which will cause the game to call the
             // FinalizeTransaction facet method below to grant the purchased
             // items to the player.
+
+            return transaction;
         }
 
         /// <summary>

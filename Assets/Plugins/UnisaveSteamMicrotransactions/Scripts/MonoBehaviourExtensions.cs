@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Threading;
 using System.Threading.Tasks;
 using LightJson;
 using Steamworks;
@@ -42,15 +43,34 @@ namespace Unisave.SteamMicrotransactions
         #region "Checkout flow and its callbacks"
         
         /// <summary>
-        /// Get resolved when the Steamworks callback for transaction
-        /// finalization is invoked
+        /// For how many seconds should we wait for the Steam Overlay to open?
+        /// (just open, not close - that depends on the player)
+        /// This is used to detect issues with the Steam Overlay not opening,
+        /// for example during faulty Steam Client communication.
         /// </summary>
-        private static TaskCompletionSource<CheckoutFlowResult> callbackTcs = null;
+        public const int OverlayOpeningTimeoutSeconds = 30_000;
+        
+        /// <summary>
+        /// Gets resolved when the steam overlay is displayed
+        /// (cancellation is handled in parallel with Task.Delay)
+        /// </summary>
+        private static TaskCompletionSource<object> overlayCallbackTcs = null;
+        
+        /// <summary>
+        /// The Steamworks callback for Steam Overlay openning/closing
+        /// </summary>
+        private static Callback<GameOverlayActivated_t> overlayCallback;
+        
+        /// <summary>
+        /// Get resolved when the Steamworks callback for transaction
+        /// finalization is invoked (the authorization callback)
+        /// </summary>
+        private static TaskCompletionSource<CheckoutFlowResult> authorizationCallbackTcs = null;
         
         /// <summary>
         /// The Steamworks callback for transaction finalization
         /// </summary>
-        private static Callback<MicroTxnAuthorizationResponse_t> callback;
+        private static Callback<MicroTxnAuthorizationResponse_t> authorizationCallback;
         
         /// <summary>
         /// Accepts a Steam microtransaction proposal as an argument and
@@ -77,7 +97,7 @@ namespace Unisave.SteamMicrotransactions
                 );
             }
             
-            if (callbackTcs != null)
+            if (authorizationCallbackTcs != null)
             {
                 throw new InvalidOperationException(
                     "Only one Steam microtransaction can be handled at a time."
@@ -86,14 +106,19 @@ namespace Unisave.SteamMicrotransactions
             
             try
             {
-                callbackTcs = new TaskCompletionSource<CheckoutFlowResult>();
-                RegisterCallback();
+                overlayCallbackTcs = new TaskCompletionSource<object>();
+                authorizationCallbackTcs = new TaskCompletionSource<CheckoutFlowResult>();
+                RegisterCallbacks();
                 
-                await monoBehaviour.CallFacet((SteamPurchasingServerFacet f) =>
-                    f.InitiateTransaction(transactionProposal)
+                var transaction = await monoBehaviour.CallFacet(
+                    (SteamPurchasingServerFacet f) =>
+                        f.InitiateTransaction(transactionProposal)
                 );
+
+                await WaitForOverlayToOpen(monoBehaviour, transaction);
                 
-                return await callbackTcs.Task;
+                // wait for the player to close the overlay
+                return await authorizationCallbackTcs.Task;
             }
             catch (Exception e)
             {
@@ -101,20 +126,69 @@ namespace Unisave.SteamMicrotransactions
             }
             finally
             {
-                DisposeCallback();
-                callbackTcs = null;
+                DisposeCallbacks();
+                authorizationCallbackTcs = null;
             }
         });
+
+        private static async Task WaitForOverlayToOpen(
+            MonoBehaviour monoBehaviour,
+            SteamTransactionEntity transaction
+        )
+        {
+            var overlayTask = overlayCallbackTcs.Task;
+            var timeoutTask = Task.Delay(5_000);
+
+            // wait for the first of them
+            var finishedTask = await Task.WhenAny(overlayTask, timeoutTask);
+            
+            // handle successful opening
+            if (finishedTask == overlayTask)
+                return;
+            
+            // we timed out! Now we need to throw an exception and report it
+            var exception = new TimeoutException(
+                $"The Steam Overlay did not open in " +
+                $"{OverlayOpeningTimeoutSeconds} after transaction " +
+                $"initiation. There is likely some issue with communication " +
+                $"between your game and the Steam client. Make sure your game " +
+                $"was launched via the Steam client and that it has correct app ID."
+            );
+            JsonObject serializedException = Serializer.ToJson<Exception>(exception);
+            serializedException.Remove("$type");
+            
+            // upload the exception to the server
+            await monoBehaviour.CallFacet(
+                (SteamPurchasingServerFacet f) => f.UploadClientException(
+                    transaction.OrderId,
+                    transaction.EntityId,
+                    serializedException
+                )
+            );
+
+            // throw the exception
+            throw exception;
+        }
+        
+        private static void OverlayCallbackHandler(GameOverlayActivated_t payload)
+        {
+            // wait only for the event, when the overlay is SHOWN and NOT by the USER
+            if (payload.m_bActive == 1 && !payload.m_bUserInitiated)
+            {
+                // stop waiting for the overlay
+                overlayCallbackTcs.SetResult(null);
+            }
+        }
         
         /// <summary>
         /// This method is called by Steamworks when the transaction finishes
         /// (player either authorized or aborted the transaction)
         /// </summary>
-        public static async void SteamworksCallbackHandler(
+        private static async void SteamworksAuthorizationCallbackHandler(
             MicroTxnAuthorizationResponse_t response
         )
         {
-            if (callbackTcs == null)
+            if (authorizationCallbackTcs == null)
             {
                 Debug.LogWarning(
                     "Steamworks microtransaction callback was called, " +
@@ -140,40 +214,48 @@ namespace Unisave.SteamMicrotransactions
             }
             catch (Exception e)
             {
-                callbackTcs.SetResult(CheckoutFlowResult.FromException(e));
+                authorizationCallbackTcs.SetResult(CheckoutFlowResult.FromException(e));
                 return;
             }
         
             // transaction has been aborted by the player
             if (response.m_bAuthorized != 1)
             {
-                callbackTcs.SetResult(CheckoutFlowResult.FromAbort());
+                authorizationCallbackTcs.SetResult(CheckoutFlowResult.FromAbort());
                 return;
             }
 
             // everything went according to plans
-            callbackTcs.SetResult(CheckoutFlowResult.FromSuccess(transaction));
+            authorizationCallbackTcs.SetResult(CheckoutFlowResult.FromSuccess(transaction));
         }
 
-        private static void RegisterCallback()
+        private static void RegisterCallbacks()
         {
-            if (callback != null)
+            if (authorizationCallback != null)
             {
                 throw new InvalidOperationException(
                     "Cannot register callback while it is already registered."
                 );
             }
             
-            callback = Callback<MicroTxnAuthorizationResponse_t>
-                .Create(SteamworksCallbackHandler);
+            authorizationCallback = Callback<MicroTxnAuthorizationResponse_t>
+                .Create(SteamworksAuthorizationCallbackHandler);
+            overlayCallback = Callback<GameOverlayActivated_t>
+                .Create(OverlayCallbackHandler);
         }
 
-        private static void DisposeCallback()
+        private static void DisposeCallbacks()
         {
-            if (callback != null)
+            if (authorizationCallback != null)
             {
-                callback.Dispose();
-                callback = null;
+                authorizationCallback.Dispose();
+                authorizationCallback = null;
+            }
+            
+            if (overlayCallback != null)
+            {
+                overlayCallback.Dispose();
+                overlayCallback = null;
             }
         }
         
@@ -254,7 +336,8 @@ namespace Unisave.SteamMicrotransactions
             catch (Exception e)
             {
                 // prepare payload
-                JsonObject exception = Serializer.ToJson<Exception>(e);
+                JsonObject exception = Serializer.ToJson(e);
+                exception.Remove("$type");
                 
                 // upload the exception to the server
                 await monoBehaviour.CallFacet(

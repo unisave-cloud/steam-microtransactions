@@ -4,6 +4,20 @@ Steam documentation on game uploading:
 https://partner.steamgames.com/doc/sdk/uploading
 
 
+## Preparing unisave environment
+
+Make sure you have proper environment variables in unisave, before testing the integration. Mainly, **make sure you have the sandbox mode enabled!**
+
+```bash
+STEAM_API_URL=https://partner.steam-api.com/
+STEAM_APP_ID=2192070
+STEAM_PUBLISHER_KEY=...
+STEAM_USE_MICROTRANSACTION_SANDBOX=true
+```
+
+Copy the publisher key over from Engine Evolution.
+
+
 ## Preparing a game in Steamworks web portal
 
 The Steamworks dashboard is here:

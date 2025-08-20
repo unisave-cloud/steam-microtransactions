@@ -17,13 +17,41 @@ namespace Unisave.SteamMicrotransactions
     /// </summary>
     public class SteamMicrotransactionsConfig
     {
+        /// <summary>
+        /// Base URL to the Steam servers
+        /// </summary>
         public string SteamApiUrl { get; private set; }
         
+        /// <summary>
+        /// ID of your game in Steam
+        /// </summary>
         public string SteamAppId { get; private set; }
         
+        /// <summary>
+        /// Your secret key to access the Steam API servers
+        /// </summary>
         public string SteamPublisherKey { get; private set; }
         
+        /// <summary>
+        /// Whether to use the Steam's sandbox API (for testing) or the real one
+        /// </summary>
         public bool UseSandbox { get; private set; }
+        
+        /// <summary>
+        /// Is the scheduler responsible for Steam MTX logic enabled?
+        /// </summary>
+        public bool SchedulerEnabled { get; private set; }
+        
+        /// <summary>
+        /// For how many seconds after worker startup should the scheduler wait,
+        /// before it executes its first tick.
+        /// </summary>
+        public int SchedulerDelaySeconds { get; private set; }
+        
+        /// <summary>
+        /// How many seconds should the scheduler wait in between ticks. 
+        /// </summary>
+        public int SchedulerPeriodSeconds { get; private set; }
 
         public static SteamMicrotransactionsConfig ParseFromEnv(EnvStore env)
         {
@@ -38,6 +66,18 @@ namespace Unisave.SteamMicrotransactions
                 UseSandbox = env.GetBool(
                     key: "STEAM_USE_MICROTRANSACTION_SANDBOX",
                     defaultValue: true
+                ),
+                SchedulerEnabled = env.GetBool(
+                    key: "STEAM_MTX_SCHEDULER_ENABLED",
+                    defaultValue: true
+                ),
+                SchedulerDelaySeconds = env.GetInt(
+                    key: "STEAM_MTX_SCHEDULER_DELAY_SECONDS",
+                    defaultValue: 30
+                ),
+                SchedulerPeriodSeconds = env.GetInt(
+                    key: "STEAM_MTX_SCHEDULER_PERIOD_SECONDS",
+                    defaultValue: 15 * 60 // 15 mins
                 )
             };
         }
@@ -48,6 +88,14 @@ namespace Unisave.SteamMicrotransactions
         /// </summary>
         public void LogValidationWarnings()
         {
+            if (string.IsNullOrEmpty(SteamAppId))
+            {
+                Log.Warning(
+                    "The STEAM_APP_ID environment variable is " +
+                    "missing. Steam API calls will fail due to authentication."
+                );
+            }
+            
             if (string.IsNullOrEmpty(SteamPublisherKey))
             {
                 Log.Warning(

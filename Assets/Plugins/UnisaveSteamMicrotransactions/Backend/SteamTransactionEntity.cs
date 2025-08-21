@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using LightJson;
 using Unisave.Entities;
 
-namespace Unisave.SteamMicrotransactions
+namespace Unisave.SteamMicrotransactions.Steam
 {
     /// <summary>
     /// Represents a single steam microtransaction

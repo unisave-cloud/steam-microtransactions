@@ -1,4 +1,4 @@
-namespace Unisave.SteamMicrotransactions
+namespace Unisave.SteamMicrotransactions.Steam
 {
     /// <summary>
     /// Contains metadata about the Unisave Steam Microtransactions module

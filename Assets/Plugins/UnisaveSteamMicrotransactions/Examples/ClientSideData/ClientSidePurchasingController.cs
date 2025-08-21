@@ -7,7 +7,7 @@ using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
 
-namespace Unisave.SteamMicrotransactions.Examples.ClientSideData
+namespace Unisave.SteamMicrotransactions.Steam.Examples.ClientSideData
 {
     public class ClientSidePurchasingController : MonoBehaviour
     {

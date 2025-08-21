@@ -2,7 +2,7 @@ using System;
 using Unisave.Facades;
 using Unisave.Facets;
 
-namespace Unisave.SteamMicrotransactions.Examples.SimpleDemo
+namespace Unisave.SteamMicrotransactions.Steam.Examples.SimpleDemo
 {
     /// <summary>
     /// Dummy facet that performs login for the John Doe player

@@ -1,4 +1,4 @@
-namespace Unisave.SteamMicrotransactions
+namespace Unisave.SteamMicrotransactions.Steam
 {
     /// <summary>
     /// String-enum representing states that a steam transaction can be in.

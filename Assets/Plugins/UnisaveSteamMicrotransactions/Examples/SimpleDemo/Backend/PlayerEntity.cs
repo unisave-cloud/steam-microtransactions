@@ -1,6 +1,6 @@
 using Unisave.Entities;
 
-namespace Unisave.SteamMicrotransactions.Examples.SimpleDemo
+namespace Unisave.SteamMicrotransactions.Steam.Examples.SimpleDemo
 {
     [EntityCollectionName("players")]
     public class PlayerEntity : Entity

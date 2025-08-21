@@ -1,6 +1,6 @@
 using System;
 
-namespace Unisave.SteamMicrotransactions
+namespace Unisave.SteamMicrotransactions.Steam
 {
     /// <summary>
     /// Represents one item (product) in a steam microtransaction.

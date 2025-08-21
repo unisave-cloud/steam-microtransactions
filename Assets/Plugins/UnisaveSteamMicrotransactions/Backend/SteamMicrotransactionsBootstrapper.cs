@@ -1,9 +1,10 @@
 using Unisave.Bootstrapping;
 using Unisave.Foundation;
+using Unisave.SteamMicrotransactions.Steam.Steam;
 
-namespace Unisave.SteamMicrotransactions
+namespace Unisave.SteamMicrotransactions.Steam
 {
-    public class SteamMicrotransactionsBootstrapperBase : Bootstrapper
+    public class SteamMicrotransactionsBootstrapper : Bootstrapper
     {
         // run in between the framework and the user
         public override int StageNumber => BootstrappingStage.Modules;
@@ -14,6 +15,9 @@ namespace Unisave.SteamMicrotransactions
             EnvStore env = Services.Resolve<EnvStore>();
             var config = SteamMicrotransactionsConfig.ParseFromEnv(env);
             Services.RegisterInstance(config);
+            
+            // register the Steam API service
+            Services.RegisterSingleton<SteamWebMtxApi>();
             
             // start the scheduler on another thread-pool thread
             // (will be stopped during service disposal)

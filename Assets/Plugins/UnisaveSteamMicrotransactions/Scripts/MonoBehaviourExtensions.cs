@@ -8,7 +8,7 @@ using Unisave.Facets;
 using Unisave.Serialization;
 using UnityEngine;
 
-namespace Unisave.SteamMicrotransactions
+namespace Unisave.SteamMicrotransactions.Steam
 {
     /// <summary>
     /// Allows you to interact with steam microtransactions from mono behaviours

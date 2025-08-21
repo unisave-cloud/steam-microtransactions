@@ -1,6 +1,6 @@
 using System;
 
-namespace Unisave.SteamMicrotransactions
+namespace Unisave.SteamMicrotransactions.Steam
 {
     /// <summary>
     /// Holds the result of a Steam microtransaction

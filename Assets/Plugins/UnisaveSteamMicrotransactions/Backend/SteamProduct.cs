@@ -4,7 +4,7 @@ using System.Threading.Tasks;
 using Unisave.Foundation;
 using Unisave.Utils;
 
-namespace Unisave.SteamMicrotransactions
+namespace Unisave.SteamMicrotransactions.Steam
 {
     /// <summary>
     /// Interface for a virtual product (item)

@@ -1,7 +1,7 @@
 using System.Collections.Generic;
 using Unisave.Facades;
 
-namespace Unisave.SteamMicrotransactions.Examples.ClientSideData
+namespace Unisave.SteamMicrotransactions.Steam.Examples.ClientSideData
 {
     /// <summary>
     /// Defines a "20 Diamonds" Steam virtual product that can be purchased

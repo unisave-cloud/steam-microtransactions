@@ -9,7 +9,7 @@ using Unisave.Serialization;
 using UnityEngine;
 using UnityEngine.UI;
 
-namespace Unisave.SteamMicrotransactions.Examples.SimpleDemo
+namespace Unisave.SteamMicrotransactions.Steam.Examples.SimpleDemo
 {
     public class ExamplePurchasingController : MonoBehaviour
     {

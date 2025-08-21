@@ -10,7 +10,7 @@ using Unisave.Foundation;
  * STEAM_USE_MICROTRANSACTION_SANDBOX=false
  */
 
-namespace Unisave.SteamMicrotransactions
+namespace Unisave.SteamMicrotransactions.Steam
 {
     /// <summary>
     /// Server-side configuration for the Steam microtransactions module
@@ -52,6 +52,12 @@ namespace Unisave.SteamMicrotransactions
         /// How many seconds should the scheduler wait in between ticks. 
         /// </summary>
         public int SchedulerPeriodSeconds { get; private set; }
+        
+        /// <summary>
+        /// How far back into the past should transactions be reconciled
+        /// via the Steam GetReport API (chargebacks, refunds, etc.)
+        /// </summary>
+        public int ReconcileTransactionsYoungerThanDays { get; private set; }
 
         public static SteamMicrotransactionsConfig ParseFromEnv(EnvStore env)
         {
@@ -78,6 +84,10 @@ namespace Unisave.SteamMicrotransactions
                 SchedulerPeriodSeconds = env.GetInt(
                     key: "STEAM_MTX_SCHEDULER_PERIOD_SECONDS",
                     defaultValue: 15 * 60 // 15 mins
+                ),
+                ReconcileTransactionsYoungerThanDays = env.GetInt(
+                    key: "STEAM_MTX_RECONCILE_TRANSACTIONS_YOUNGER_THAN_DAYS",
+                    defaultValue: 90 // 3 months
                 )
             };
         }

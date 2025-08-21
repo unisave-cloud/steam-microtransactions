@@ -1,7 +1,7 @@
 using System.Collections.Generic;
 using Unisave.Facades;
 
-namespace Unisave.SteamMicrotransactions.Examples.SimpleDemo
+namespace Unisave.SteamMicrotransactions.Steam.Examples.SimpleDemo
 {
     /// <summary>
     /// Defines a sack of gold coins Steam virtual product that can be purchased

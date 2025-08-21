@@ -6,11 +6,10 @@ using LightJson;
 using Unisave.Facades;
 using Unisave.Facets;
 using Unisave.Foundation;
-using Unisave.HttpClient;
 using Unisave.Serialization;
-using Unisave.Utils;
+using Unisave.SteamMicrotransactions.Steam.Steam;
 
-namespace Unisave.SteamMicrotransactions
+namespace Unisave.SteamMicrotransactions.Steam
 {
     /// <summary>
     /// Implements the "Steam purchasing server" as described by the Steam docs.
@@ -27,15 +26,18 @@ namespace Unisave.SteamMicrotransactions
     {
         private readonly SteamMicrotransactionsConfig config;
         private readonly IContainer services;
+        private readonly SteamWebMtxApi steamApi;
         
         public SteamPurchasingServerFacet(
             SteamMicrotransactionsConfig config,
-            IContainer services
+            IContainer services,
+            SteamWebMtxApi steamApi
         )
         {
             this.config = config;
             this.services = services;
-            
+            this.steamApi = steamApi;
+
             config.LogValidationWarnings();
         }
 
@@ -70,17 +72,16 @@ namespace Unisave.SteamMicrotransactions
 
             StoreNewTransaction(transaction);
 
-            await CaptureExceptions(transaction, async () =>
-            {
-                Response response = await SendInitiationRequestToSteam(
-                    transaction
-                );
-
-                if (response["response"]["result"].AsString != "OK")
-                    StoreInitiationErrorAndThrow(transaction, response);
-
-                MarkTransactionAsInitiated(transaction, response);
-            });
+            await CaptureExceptions(
+                transaction,
+                SteamTransactionState.InitiationError,
+                async () =>
+                {
+                    ulong transactionId = await steamApi.InitTxn(transaction);
+                    
+                    MarkTransactionAsInitiated(transaction, transactionId);
+                }
+            );
 
             // The player will now be prompted by the Steam Overlay to authorize
             // and pay the transaction. Then Steam will notify the game via
@@ -115,21 +116,20 @@ namespace Unisave.SteamMicrotransactions
                 return transaction;
             }
 
-            await CaptureExceptions(transaction, async () =>
-            {
-                Response response = await SendFinalizationRequestToSteam(
-                    transaction
-                );
+            await CaptureExceptions(
+                transaction,
+                SteamTransactionState.FinalizationError,
+                async () =>
+                {
+                    await steamApi.FinalizeTxn(transaction.OrderId);
 
-                if (response["response"]["result"].AsString != "OK")
-                    StoreFinalizationErrorAndThrow(transaction, response);
+                    MarkTransactionAsAuthorized(transaction);
 
-                MarkTransactionAsAuthorized(transaction);
+                    await GiveProductsToPlayer(transaction);
 
-                await GiveProductsToPlayer(transaction);
-
-                MarkTransactionAsCompleted(transaction);
-            });
+                    MarkTransactionAsCompleted(transaction);
+                }
+            );
 
             return transaction;
         }
@@ -294,86 +294,13 @@ namespace Unisave.SteamMicrotransactions
             transaction.Save();
         }
 
-        private async Task<Response> SendInitiationRequestToSteam(
-            SteamTransactionEntity transaction
-        )
-        {
-            // https://partner.steamgames.com/doc/webapi/ISteamMicroTxn#InitTxn
-
-            var response = await Http.PostAsync(
-                GetSteamApiUrl() + "InitTxn/v3/",
-                BuildInitiationRequestBody(transaction)
-            );
-
-            if (!response.IsOk)
-            {
-                string body = await response.BodyAsync();
-                Log.Info("Steam API response body:\n" + body);
-                response.Throw();
-            }
-
-            return response;
-        }
-
-        private Dictionary<string, string> BuildInitiationRequestBody(
-            SteamTransactionEntity transaction
-        )
-        {
-            var body = new Dictionary<string, string>
-            {
-                ["key"] = config.SteamPublisherKey.ToString(),
-                ["orderid"] = transaction.OrderId.ToString(),
-                ["steamid"] = transaction.PlayerSteamId.ToString(),
-                ["appid"] = config.SteamAppId.ToString(),
-                ["itemcount"] = transaction.Items.Count.ToString(),
-                ["language"] = transaction.Language,
-                ["currency"] = transaction.Currency
-            };
-
-            for (int i = 0; i < transaction.Items.Count; i++)
-            {
-                var item = transaction.Items[i];
-
-                body[$"itemid[{i}]"] = item.ItemId.ToString();
-                body[$"qty[{i}]"] = item.Quantity.ToString();
-                body[$"amount[{i}]"] = item.TotalAmountInCents.ToString();
-                body[$"description[{i}]"] = item.Description;
-                if (!string.IsNullOrWhiteSpace(item.Category))
-                    body[$"category[{i}]"] = item.Category;
-            }
-
-            return body;
-        }
-
-        private void StoreInitiationErrorAndThrow(
-            SteamTransactionEntity transaction,
-            Response response
-        )
-        {
-            transaction.State = SteamTransactionState.InitiationError;
-            transaction.ErrorCode
-                = response["response"]["error"]["errorcode"].AsString;
-            transaction.ErrorDescription
-                = response["response"]["error"]["errordesc"].AsString;
-            transaction.Save();
-
-            throw new SteamApiErrorException(
-                "Steam rejected transaction initiation.",
-                transaction.OrderId,
-                transaction.ErrorCode,
-                transaction.ErrorDescription
-            );
-        }
-
         private void MarkTransactionAsInitiated(
             SteamTransactionEntity transaction,
-            Response response
+            ulong assignedTransactionId
         )
         {
             transaction.State = SteamTransactionState.Initiated;
-            transaction.TransactionId = ulong.Parse(
-                response["response"]["params"]["transid"].AsString
-            );
+            transaction.TransactionId = assignedTransactionId;
             transaction.Save();
 
             Log.Info("Marked transaction as initiated.");
@@ -409,52 +336,6 @@ namespace Unisave.SteamMicrotransactions
             transaction.Save();
 
             Log.Info("Marked transaction as aborted.");
-        }
-
-        private async Task<Response> SendFinalizationRequestToSteam(
-            SteamTransactionEntity transaction
-        )
-        {
-            // https://partner.steamgames.com/doc/webapi/ISteamMicroTxn#FinalizeTxn
-
-            var response = await Http.PostAsync(
-                GetSteamApiUrl() + "FinalizeTxn/v2/",
-                new Dictionary<string, string>
-                {
-                    ["key"] = config.SteamPublisherKey.ToString(),
-                    ["orderid"] = transaction.OrderId.ToString(),
-                    ["appid"] = config.SteamAppId.ToString(),
-                }
-            );
-
-            if (!response.IsOk)
-            {
-                string body = await response.BodyAsync();
-                Log.Info("Steam API response body:\n" + body);
-                response.Throw();
-            }
-
-            return response;
-        }
-
-        private void StoreFinalizationErrorAndThrow(
-            SteamTransactionEntity transaction,
-            Response response
-        )
-        {
-            transaction.State = SteamTransactionState.FinalizationError;
-            transaction.ErrorCode
-                = response["response"]["error"]["errorcode"].AsString;
-            transaction.ErrorDescription
-                = response["response"]["error"]["errordesc"].AsString;
-            transaction.Save();
-
-            throw new SteamApiErrorException(
-                "Steam rejected transaction finalization.",
-                transaction.OrderId,
-                transaction.ErrorCode,
-                transaction.ErrorDescription
-            );
         }
 
         private void MarkTransactionAsAuthorized(
@@ -513,25 +394,6 @@ namespace Unisave.SteamMicrotransactions
         }
 
         #endregion
-
-        /// <summary>
-        /// URL of the Steam microtransactions API, ending with a slash
-        /// </summary>
-        private string GetSteamApiUrl()
-        {
-            // base url for all Steam APIs
-            string steamApi = Str.Finish(config.SteamApiUrl, "/");
-
-            // create the microtransactions API URL
-            if (config.UseSandbox)
-            {
-                return steamApi + "ISteamMicroTxnSandbox/";
-            }
-            else
-            {
-                return steamApi + "ISteamMicroTxn/";
-            }
-        }
         
         /// <summary>
         /// Finds a transaction by its order ID and entity ID
@@ -556,9 +418,18 @@ namespace Unisave.SteamMicrotransactions
         /// <summary>
         /// Captures unexpected exceptions and sets the transaction state
         /// to "exception" and stores the exception within the entity.
+        /// The SteamApiFailureException is handled differently and the
+        /// entity state is set to the argument provided to this method.
         /// </summary>
+        /// <param name="transaction">The transaction entity being worked on</param>
+        /// <param name="transactionStateAfterFailure">
+        /// What state should the entity transition to when
+        /// a SteamApiFailureException exception occurs.
+        /// </param>
+        /// <param name="action">The code being observed for exceptions</param>
         private async Task CaptureExceptions(
             SteamTransactionEntity transaction,
+            string transactionStateAfterFailure,
             Func<Task> action
         )
         {
@@ -566,10 +437,15 @@ namespace Unisave.SteamMicrotransactions
             {
                 await action.Invoke();
             }
-            catch (SteamApiErrorException)
+            catch (SteamApiFailureException e)
             {
-                // we do not capture Steam API errors,
-                // those are captured manually in the code above
+                // store the Steam API failure in the transaction
+                transaction.State = transactionStateAfterFailure;
+                transaction.ErrorCode = e.ErrorCode;
+                transaction.ErrorDescription = e.ErrorDescription;
+                transaction.Save();
+                
+                // let the exception propagate upward
                 throw;
             }
             catch (Exception e)

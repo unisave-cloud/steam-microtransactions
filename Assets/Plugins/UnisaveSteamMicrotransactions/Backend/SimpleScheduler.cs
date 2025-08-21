@@ -1,8 +1,9 @@
 using System;
 using System.Threading;
 using System.Threading.Tasks;
+using Unisave.Foundation;
 
-namespace Unisave.SteamMicrotransactions
+namespace Unisave.SteamMicrotransactions.Steam
 {
     /// <summary>
     /// Implements a simple scheduler that executes periodic code
@@ -32,8 +33,17 @@ namespace Unisave.SteamMicrotransactions
         private readonly CancellationTokenSource schedulerTokenSource
             = new CancellationTokenSource();
 
-        public SimpleScheduler(SteamMicrotransactionsConfig config)
+        /// <summary>
+        /// Used to resolve services for the job execution in the tick method
+        /// </summary>
+        private IContainer services;
+
+        public SimpleScheduler(
+            SteamMicrotransactionsConfig config,
+            IContainer services
+        )
         {
+            this.services = services;
             delay = TimeSpan.FromSeconds(config.SchedulerDelaySeconds);
             period = TimeSpan.FromSeconds(config.SchedulerPeriodSeconds);
         }
@@ -83,7 +93,7 @@ namespace Unisave.SteamMicrotransactions
 
                 try
                 {
-                    OnTickBody();
+                    await OnTickBody();
                 }
                 catch (OperationCanceledException)
                 {
@@ -101,9 +111,19 @@ namespace Unisave.SteamMicrotransactions
             }
         }
 
-        private void OnTickBody()
+        /// <summary>
+        /// This method is periodically executed and has its exceptions handled
+        /// </summary>
+        private async Task OnTickBody()
         {
-            // here we do the interesting logic
+            // Execute the /GetReport Steam logic
+            // https://partner.steamgames.com/doc/webapi/ISteamMicroTxn#GetReport
+            
+            // create the job
+            var job = services.Resolve<ProcessSteamReportJob>();
+            
+            // run
+            await job.RunAsync(schedulerTokenSource.Token);
         }
     }
 }

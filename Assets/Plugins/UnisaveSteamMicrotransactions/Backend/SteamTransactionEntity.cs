@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using LightJson;
+using Plugins.UnisaveSteamMicrotransactions.Backend.Steam;
 using Unisave.Entities;
 
 namespace Unisave.SteamMicrotransactions.Steam
@@ -93,6 +94,18 @@ namespace Unisave.SteamMicrotransactions.Steam
         /// Null if no exception occured.
         /// </summary>
         public string StateBeforeException { get; set; }
+        
+        /// <summary>
+        /// The value that represents this transaction (this order),
+        /// returned by the Steam APIs GetReport/v5/ endpoint.
+        /// </summary>
+        public ReportOrder SteamReportOrder { get; set; }
+
+        /// <summary>
+        /// When was the report order fetched from the Steam API
+        /// and written into this entity
+        /// </summary>
+        public DateTime? SteamReportOrderTimestamp { get; set; } = null;
 
         /// <summary>
         /// Generates a random order ID uint value.

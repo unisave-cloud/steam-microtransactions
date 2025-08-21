@@ -1,8 +1,12 @@
 using System;
 using System.Collections.Generic;
+using System.Threading;
 using System.Threading.Tasks;
 using LightJson;
+using Plugins.UnisaveSteamMicrotransactions.Backend.Steam;
 using Unisave.HttpClient;
+using Unisave.Serialization;
+using Unisave.Serialization.Context;
 using Unisave.Utils;
 
 namespace Unisave.SteamMicrotransactions.Steam.Steam
@@ -148,21 +152,29 @@ namespace Unisave.SteamMicrotransactions.Steam.Steam
         /// <param name="maxResults">
         /// Maximum number of items to return, should be between 1K and 10K.
         /// </param>
-        public async Task GetReport(string type, DateTime time, int maxResults)
+        /// <param name="cancellationToken">Token to cancel the request</param>
+        public async Task<List<ReportOrder>> GetReport(
+            string type,
+            DateTime time,
+            int maxResults,
+            CancellationToken cancellationToken
+        )
         {
             // https://partner.steamgames.com/doc/webapi/ISteamMicroTxn#GetReport
             
-            var response = await http.GetAsync(
-                GetBaseUrl() + "GetReport/v5/",
-                new Dictionary<string, string>()
-                {
-                    ["key"] = config.SteamPublisherKey,
-                    ["appid"] = config.SteamAppId,
-                    ["type"] = type,
-                    ["time"] = time.ToString("yyyy-MM-dd'T'HH:mm:ss.ffK"),
-                    ["maxresults"] = maxResults.ToString()
-                }
-            );
+            var response = await http
+                .WithCancellation(cancellationToken)
+                .GetAsync(
+                    GetBaseUrl() + "GetReport/v5/",
+                    new Dictionary<string, string>()
+                    {
+                        ["key"] = config.SteamPublisherKey,
+                        ["appid"] = config.SteamAppId,
+                        ["type"] = type,
+                        ["time"] = time.ToString("yyyy-MM-dd'T'HH:mm:ssK"),
+                        ["maxresults"] = maxResults.ToString()
+                    }
+                );
 
             await SteamApiHttpException.ThrowIfHttpIsNon200Async(
                 "Steam API GetReport/v5/ endpoint invocation failed:",
@@ -175,8 +187,11 @@ namespace Unisave.SteamMicrotransactions.Steam.Steam
                 "Steam API GetReport/v5/ endpoint returned a failure:",
                 responseJson
             );
-
-            // TODO: parse the response and return
+            
+            return Serializer.FromJson<List<ReportOrder>>(
+                responseJson["response"]["params"]["orders"],
+                DeserializationContext.ServerToServer
+            );
         }
         
         /// <summary>

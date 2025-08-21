@@ -24,7 +24,6 @@ namespace Unisave.SteamMicrotransactions.Steam
     /// </summary>
     public class SteamPurchasingServerFacet : Facet
     {
-        private readonly SteamMicrotransactionsConfig config;
         private readonly IContainer services;
         private readonly SteamWebMtxApi steamApi;
         
@@ -34,10 +33,9 @@ namespace Unisave.SteamMicrotransactions.Steam
             SteamWebMtxApi steamApi
         )
         {
-            this.config = config;
             this.services = services;
             this.steamApi = steamApi;
-
+            
             config.LogValidationWarnings();
         }
 
@@ -251,17 +249,17 @@ namespace Unisave.SteamMicrotransactions.Steam
             
             if (item.UnitCost != productInfo.UnitCost)
                 throw new ArgumentException(
-                    "Item does not match the product in: 'ItemId'"
+                    "Item does not match the product in: 'UnitCost'"
                 );
             
             if (item.Description != productInfo.Description)
                 throw new ArgumentException(
-                    "Item does not match the product in: 'ItemId'"
+                    "Item does not match the product in: 'Description'"
                 );
             
             if (item.Category != productInfo.Category)
                 throw new ArgumentException(
-                    "Item does not match the product in: 'ItemId'"
+                    "Item does not match the product in: 'Category'"
                 );
             
             if (item.Quantity <= 0)
@@ -276,6 +274,15 @@ namespace Unisave.SteamMicrotransactions.Steam
             SteamTransactionEntity transaction
         )
         {
+            // Clear data that should not be set by the client
+            transaction.TransactionId = 0;
+            transaction.ErrorCode = null;
+            transaction.ErrorDescription = null;
+            transaction.Exception = null;
+            transaction.StateBeforeException = null;
+            transaction.SteamReportOrder = null;
+            transaction.SteamReportOrderTimestamp = null;
+            
             // Generate order id for the transaction
             transaction.OrderId = SteamTransactionEntity.GenerateRandomOrderId();
 

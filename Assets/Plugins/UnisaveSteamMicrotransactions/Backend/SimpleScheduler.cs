@@ -36,7 +36,7 @@ namespace Unisave.SteamMicrotransactions.Steam
         /// <summary>
         /// Used to resolve services for the job execution in the tick method
         /// </summary>
-        private IContainer services;
+        private readonly IContainer services;
 
         public SimpleScheduler(
             SteamMicrotransactionsConfig config,
@@ -82,10 +82,7 @@ namespace Unisave.SteamMicrotransactions.Steam
         {
             Console.WriteLine("[SteamMTX SimpleScheduler]: Running.");
             
-            await Task.Delay(
-                TimeSpan.FromSeconds(10),
-                schedulerTokenSource.Token
-            );
+            await Task.Delay(delay, schedulerTokenSource.Token);
             
             while (!schedulerTokenSource.Token.IsCancellationRequested)
             {
@@ -104,10 +101,7 @@ namespace Unisave.SteamMicrotransactions.Steam
                     Console.WriteLine("[SteamMTX SimpleScheduler]: " + e);
                 }
                 
-                await Task.Delay(
-                    TimeSpan.FromSeconds(30),
-                    schedulerTokenSource.Token
-                );
+                await Task.Delay(period, schedulerTokenSource.Token);
             }
         }
 
